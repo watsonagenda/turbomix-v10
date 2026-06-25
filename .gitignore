@@ -1,0 +1,30 @@
+# Build artifacts
+.build/
+DerivedData/
+*.xcuserdata
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# IDE
+.vscode/
+.idea/
+
+# Generated icons
+TurboMix.iconset/
+TurboMix.icns
+TurboMix-LiquidGlass.png
+Turbo Max.iconset/
+Turbo Max.icns
+TurboMax-LiquidGlass.png
+generate_turbo_mix_icon.py
+generate_turbo_max_icon.py
+replace_turbo_max_icon.py
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
