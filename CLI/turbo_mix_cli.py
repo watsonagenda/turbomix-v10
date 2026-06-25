@@ -24,7 +24,7 @@ TurboMix CLI — AI 智能体控制接口
     python3 turbo_mix_cli.py export-config         # 导出当前配置
 
 示例 - AI Agent 自动化流程:
-    1. scan /Users/jo/Videos/clips    # 扫描素材
+    1. scan /path/to/videos           # 扫描素材目录
     2. merge --min-duration 60 --aspect-ratio tiktok9by16  # 开始混剪
     3. status                         # 查看结果
 """
@@ -41,7 +41,7 @@ from datetime import datetime
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".mts", ".ts", ".webm", ".flv", ".wmv", ".3gp"}
 
 # 配置持久化路径
-CONFIG_DIR = Path.home() / ".turbomix"
+CONFIG_DIR = Path.home() / ".appconfig"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 SESSION_FILE = CONFIG_DIR / "session.json"
 
@@ -57,11 +57,9 @@ class TurboMixCLI:
     
     def _find_binary(self, name):
         """查找二进制文件路径"""
-        paths = [
-            f"/opt/homebrew/bin/{name}",
-            f"/usr/local/bin/{name}",
-            os.path.expanduser("~/Desktop/TurboMix.app/Contents/MacOS/{name}".format(name=name)),
-        ]
+        # 优先使用系统 PATH 中的 ffmpeg
+        # 也可将 ffmpeg 放在 .app/Contents/MacOS/ 中捆绑
+        paths = []
         for path in paths:
             expanded = os.path.expanduser(path)
             if os.path.isfile(expanded) and os.access(expanded, os.X_OK):

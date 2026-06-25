@@ -1,4 +1,4 @@
-//  ContentView.swift — TurboMix v10 "Complete Fix"
+//  ContentView.swift — TurboMix v11
 //
 //  核心修复：
 //  - 文件添加：使用 NSOpenPanel.begin(completionHandler:) 替代 runModal

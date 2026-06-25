@@ -1,4 +1,4 @@
-//  QuickCutVideoApp.swift — TurboMix v10
+//  QuickCutVideoApp.swift — TurboMix v11
 //
 //  macOS 应用入口
 //  纯中文界面

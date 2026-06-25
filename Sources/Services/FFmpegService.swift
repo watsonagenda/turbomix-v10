@@ -18,12 +18,9 @@ final class FFmpegService {
         if let bundled = bundledPath, FileManager.default.isExecutableFile(atPath: bundled) {
             return bundled
         }
-        let brewPaths = [
-            "/opt/homebrew/bin/ffmpeg",
-            "/usr/local/bin/ffmpeg",
-        ]
-        for p in brewPaths where FileManager.default.isExecutableFile(atPath: p) {
-            return p
+        // 通过系统 PATH 查找
+        if let path = whichCommand("ffmpeg") {
+            return path
         }
         return "ffmpeg"
     }
@@ -33,12 +30,9 @@ final class FFmpegService {
         if let bundled = bundledPath, FileManager.default.isExecutableFile(atPath: bundled) {
             return bundled
         }
-        let brewPaths = [
-            "/opt/homebrew/bin/ffprobe",
-            "/usr/local/bin/ffprobe",
-        ]
-        for p in brewPaths where FileManager.default.isExecutableFile(atPath: p) {
-            return p
+        // 通过系统 PATH 查找
+        if let path = whichCommand("ffprobe") {
+            return path
         }
         return "ffprobe"
     }
@@ -311,6 +305,29 @@ final class FFmpegService {
     }
 
     // MARK: - 辅助
+
+
+    private func whichCommand(_ command: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        process.arguments = [command]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        process.waitUntilExit()
+        if process.terminationStatus == 0 {
+            let data = pipe.fileHandleForReading.readDataToEndOfFile() as Data
+            if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !path.isEmpty {
+                return path
+            }
+        }
+        return nil
+    }
 
     func checkAvailability() -> Bool {
         let process = Process()

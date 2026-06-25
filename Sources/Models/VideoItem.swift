@@ -1,4 +1,4 @@
-//  VideoItem.swift — TurboMix v7
+//  VideoItem.swift — TurboMix v11
 //
 //  核心数据模型：每个视频素材的元信息
 

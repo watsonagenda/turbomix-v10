@@ -1,4 +1,4 @@
-//  VideoMergeViewModel.swift — TurboMix v10
+//  VideoMergeViewModel.swift — TurboMix v11
 //
 //  UI层与服务层的桥梁
 //  管理所有状态、处理用户交互、驱动混剪流程

@@ -1,5 +1,5 @@
 // swift-tools-version: 5.9
-// Package.swift — TurboMix v8
+// Package.swift — TurboMix
 
 import PackageDescription
 

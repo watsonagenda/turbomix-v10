@@ -62,17 +62,18 @@ chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp "$PROJECT_DIR/Sources/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 
 # 复制 ffmpeg（如果 Homebrew 安装了 arm64 版本）
-FFMPEG_PATH="/opt/homebrew/bin/ffmpeg"
-FFPROBE_PATH="/opt/homebrew/bin/ffprobe"
+# 尝试查找 ffmpeg（通用方式）
+FFMPEG_PATH=$(which ffmpeg 2>/dev/null || echo "")
+FFPROBE_PATH=$(which ffprobe 2>/dev/null || echo "")
 if [ -f "$FFMPEG_PATH" ] && [ -f "$FFPROBE_PATH" ]; then
-    echo "  检测到 arm64 原生 ffmpeg，捆绑到 .app 中..."
+    echo "  检测到 ffmpeg，捆绑到 .app 中..."
     cp "$FFMPEG_PATH" "$APP_BUNDLE/Contents/MacOS/ffmpeg"
     cp "$FFPROBE_PATH" "$APP_BUNDLE/Contents/MacOS/ffprobe"
     chmod +x "$APP_BUNDLE/Contents/MacOS/ffmpeg"
     chmod +x "$APP_BUNDLE/Contents/MacOS/ffprobe"
     echo "  ffmpeg 已捆绑"
 else
-    echo "  未检测到 /opt/homebrew/bin/ffmpeg，运行时将使用系统 PATH 中的 ffmpeg"
+    echo "  未检测到 ffmpeg，运行时将使用系统 PATH 中的 ffmpeg"
 fi
 
 # 4. 复制图标

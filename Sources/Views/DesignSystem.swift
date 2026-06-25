@@ -1,4 +1,4 @@
-//  DesignSystem.swift — TurboMix v10 "Modern Apple Native"
+//  DesignSystem.swift — TurboMix v11
 //
 //  2025-2026 现代 macOS 原生设计风格
 //  Liquid Glass + 原生色彩 + 精确间距

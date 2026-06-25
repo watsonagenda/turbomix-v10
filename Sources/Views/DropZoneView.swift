@@ -1,4 +1,4 @@
-//  DropZoneView.swift — TurboMix v8
+//  DropZoneView.swift — TurboMix v11
 //
 //  辅助函数（拖放文件收集、视频 UT 类型）
 
