@@ -28,3 +28,6 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# DMG packages
+TurboMix-v*.dmg
