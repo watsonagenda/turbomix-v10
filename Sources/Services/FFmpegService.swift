@@ -14,25 +14,27 @@ final class FFmpegService {
     // MARK: - ffmpeg / ffprobe 路径
 
     private var ffmpegPath: String {
+        // 优先使用系统 PATH 中的 ffmpeg（最稳定）
+        if let path = whichCommand("ffmpeg") {
+            return path
+        }
+        // 备选：使用捆绑的 ffmpeg
         let bundledPath = Bundle.main.path(forResource: "ffmpeg", ofType: nil)
         if let bundled = bundledPath, FileManager.default.isExecutableFile(atPath: bundled) {
             return bundled
-        }
-        // 通过系统 PATH 查找
-        if let path = whichCommand("ffmpeg") {
-            return path
         }
         return "ffmpeg"
     }
 
     private var ffprobePath: String {
+        // 优先使用系统 PATH 中的 ffprobe（最稳定）
+        if let path = whichCommand("ffprobe") {
+            return path
+        }
+        // 备选：使用捆绑的 ffprobe
         let bundledPath = Bundle.main.path(forResource: "ffprobe", ofType: nil)
         if let bundled = bundledPath, FileManager.default.isExecutableFile(atPath: bundled) {
             return bundled
-        }
-        // 通过系统 PATH 查找
-        if let path = whichCommand("ffprobe") {
-            return path
         }
         return "ffprobe"
     }
