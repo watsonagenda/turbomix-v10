@@ -1,10 +1,11 @@
-//  FFmpegService.swift — TurboMix v10 "Concurrency Safe"
+//  FFmpegService.swift — TurboMix v11
 //
 //  核心引擎：ffprobe 分析 + ffmpeg concat 混剪
 //  修复：
-//  - stderrAccumulator 线程安全问题
-//  - probeVideos 并发限制更精细
+//  - 线程安全问题
+//  - probeVideos 并发限制
 //  - 优化资源释放
+//  - 修复 bundled ffmpeg 路径查找
 
 import Foundation
 
@@ -13,28 +14,34 @@ final class FFmpegService {
 
     // MARK: - ffmpeg / ffprobe 路径
 
+    /// 获取应用 Bundle 所在的 MacOS 目录路径
+    private var bundleMacOSPath: String {
+        let bundlePath = Bundle.main.bundlePath as NSString
+        return bundlePath.appendingPathComponent("MacOS") as String
+    }
+
     private var ffmpegPath: String {
-        // 优先使用系统 PATH 中的 ffmpeg（最稳定）
+        // 优先使用捆绑的 ffmpeg（在 Contents/MacOS/ 中）
+        let bundledPath = "\(bundleMacOSPath)/ffmpeg"
+        if FileManager.default.fileExists(atPath: bundledPath) {
+            return bundledPath
+        }
+        // 备选：使用系统 PATH 中的 ffmpeg
         if let path = whichCommand("ffmpeg") {
             return path
-        }
-        // 备选：使用捆绑的 ffmpeg
-        let bundledPath = Bundle.main.path(forResource: "ffmpeg", ofType: nil)
-        if let bundled = bundledPath, FileManager.default.isExecutableFile(atPath: bundled) {
-            return bundled
         }
         return "ffmpeg"
     }
 
     private var ffprobePath: String {
-        // 优先使用系统 PATH 中的 ffprobe（最稳定）
+        // 优先使用捆绑的 ffprobe（在 Contents/MacOS/ 中）
+        let bundledPath = "\(bundleMacOSPath)/ffprobe"
+        if FileManager.default.fileExists(atPath: bundledPath) {
+            return bundledPath
+        }
+        // 备选：使用系统 PATH 中的 ffprobe
         if let path = whichCommand("ffprobe") {
             return path
-        }
-        // 备选：使用捆绑的 ffprobe
-        let bundledPath = Bundle.main.path(forResource: "ffprobe", ofType: nil)
-        if let bundled = bundledPath, FileManager.default.isExecutableFile(atPath: bundled) {
-            return bundled
         }
         return "ffprobe"
     }
@@ -111,9 +118,6 @@ final class FFmpegService {
         var completed = 0
         // 分批处理，每批最多 maxConcurrency 个任务
         for chunk in urls.chunks(of: maxConcurrency) {
-            var chunkResults: [(index: Int, item: VideoItem)] = []
-            chunkResults.reserveCapacity(chunk.count)
-            
             try await withThrowingTaskGroup(of: (Int, VideoItem).self) { group in
                 for url in chunk {
                     let index = urls.firstIndex(of: url) ?? 0
@@ -124,15 +128,12 @@ final class FFmpegService {
                 }
                 
                 for try await result in group {
-                    chunkResults.append(result)
                     completed += 1
-                    let currentCompleted = completed
-                    let currentTotal = total
-                    
                     results.append(result)
                     
+                    let localCompleted = completed
                     await MainActor.run {
-                        progress(currentCompleted, currentTotal)
+                        progress(localCompleted, total)
                     }
                 }
             }
@@ -143,7 +144,7 @@ final class FFmpegService {
         return results.map { $0.item }
     }
 
-    // MARK: - 混剪合成
+    // MARK: - 混剪
 
     func mergeVideos(
         items: [VideoItem],
@@ -152,92 +153,29 @@ final class FFmpegService {
         progress: @escaping (Double, String) -> Void
     ) async throws {
         guard !items.isEmpty else {
-            throw FFmpegError.mergeFailed("没有可合成的视频素材")
+            throw FFmpegError.mergeFailed("没有可用的视频素材")
         }
 
-        let workDir = outputURL.deletingLastPathComponent()
-        let scriptPath = workDir.appendingPathComponent("turbo_mix_\(UUID().uuidString).sh")
-        
-        // 写入合并脚本
-        let scriptContent = buildMergeScript(items: items, config: config, outputURL: outputURL)
-        try scriptContent.write(to: scriptPath, atomically: true, encoding: .utf8)
-        
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [scriptPath.path]
-        
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-        
-        // 使用 Actor 保护 stderr 累积器
-        actor StderrAccumulator {
-            var text = ""
-            func append(_ s: String) { text += s }
-            func get() -> String { text }
-        }
-        let accumulator = StderrAccumulator()
-        
-        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            guard !data.isEmpty else { return }
-            guard let text = String(data: data, encoding: .utf8) else { return }
-            
-            Task {
-                await accumulator.append(text)
-            }
-            
-            if text.contains("out_time_ms="),
-               let range = text.range(of: "out_time_ms=") {
-                let valStr = text[text.index(after: range.upperBound)...]
-                    .prefix(while: { $0.isNumber || $0 == "." })
-                if let ms = Double(valStr) {
-                    let seconds = ms / 1_000_000
-                    let clamped = min((seconds / 3600) * 100, 100)
-                    let detailMsg = "合成中... \(String(format: "%.1f", seconds))秒"
-                    DispatchQueue.main.async {
-                        progress(clamped, detailMsg)
-                    }
-                }
-            }
-        }
+        // 创建临时目录
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "TurboMix_\(UUID().uuidString)"
+        )
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
 
-        try process.run()
-        process.waitUntilExit()
+        // 生成 concat 列表文件
+        let listPath = tempDir.appendingPathComponent("inputs.txt").path
 
-        stderrPipe.fileHandleForReading.readabilityHandler = nil
-        try? stdoutPipe.fileHandleForReading.close()
-        try? stderrPipe.fileHandleForReading.close()
-        
-        // 删除临时脚本
-        try? FileManager.default.removeItem(at: scriptPath)
-
-        guard process.terminationStatus == 0 else {
-            let errMsg = await accumulator.get()
-            throw FFmpegError.mergeFailed("ffmpeg 合成失败 (退出码: \(process.terminationStatus)): \(errMsg.suffix(500))")
-        }
-
-        await MainActor.run { progress(100, "完成") }
-    }
-    
-    private func buildMergeScript(items: [VideoItem], config: MergeConfig, outputURL: URL) -> String {
-        var script = "#!/bin/bash\n"
-        script += "set -e\n\n"
-        
-        // 构建 input list file
-        let listPath = outputURL.deletingLastPathComponent()
-            .appendingPathComponent("turbo_mix_inputs_\(UUID().uuidString).txt")
-            .path
-        
         var listContent = ""
         for item in items {
             let escapedPath = item.url.path.replacingOccurrences(of: "'", with: "'\\''")
             listContent += "file '\(escapedPath)'\n"
         }
-        
-        script += "cat > '\(listPath.replacingOccurrences(of: "'", with: "'\\''"))' << 'INPUTS_EOF'\n\(listContent)INPUTS_EOF\n\n"
-        
+        try listContent.write(toFile: listPath, atomically: true, encoding: .utf8)
+
+        // 构建 ffmpeg 脚本（避免 shell 转义问题）
+        var script = "#!/bin/bash\nset -e\n\n"
+        script += "rm -f '\(listPath.replacingOccurrences(of: "'", with: "'\\''"))' << 'INPUTS_EOF'\n\(listContent)INPUTS_EOF\n\n"
+
         let ffmpeg = ffmpegPath
         var args = [ffmpeg]
         
@@ -273,7 +211,62 @@ final class FFmpegService {
         script += "'\(cmdParts.joined(separator: "' '"))'\n"
         script += "\nrm -f '\(listPath.replacingOccurrences(of: "'", with: "'\\''"))'\n"
         
-        return script
+        // 执行脚本
+        let scriptPath = tempDir.appendingPathComponent("merge.sh").path
+        try script.write(toFile: scriptPath, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptPath)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [scriptPath]
+
+        let stderrPipe = Pipe()
+        process.standardError = stderrPipe
+
+        try process.run()
+
+        // 读取 stderr 获取进度
+        let fullData = try stderrPipe.fileHandleForReading.readToEnd()
+        let output = String(data: fullData ?? Data(), encoding: .utf8) ?? ""
+        
+        // 尝试从 stderr 解析进度
+        if let progressLine = output.components(separatedBy: .newlines).last {
+            if let percent = extractProgress(from: progressLine) {
+                await MainActor.run {
+                    progress(percent.0, percent.1)
+                }
+            }
+        }
+
+        process.waitUntilExit()
+
+        // 清理临时文件
+        try? FileManager.default.removeItem(at: tempDir)
+
+        guard process.terminationStatus == 0 else {
+            throw FFmpegError.mergeFailed("ffmpeg 合并失败，退出码: \(process.terminationStatus)")
+        }
+    }
+
+    /// 从 ffmpeg stderr 输出中提取进度百分比
+    private func extractProgress(from line: String) -> (Double, String)? {
+        // ffmpeg 进度行格式: time=00:01:23.45 fps=30 q=-1.0 Lsize=   12345kB
+        let components = line.components(separatedBy: "time=")
+        guard components.count > 1 else { return nil }
+        
+        let timePart = components[1].components(separatedBy: " ").first ?? ""
+        let timeComponents = timePart.components(separatedBy: ":")
+        
+        guard timeComponents.count >= 3 else { return nil }
+        
+        let hours = Int(timeComponents[0]) ?? 0
+        let minutes = Int(timeComponents[1]) ?? 0
+        let seconds = Double(timeComponents[2]) ?? 0.0
+        
+        let totalSeconds = Double(hours) * 3600.0 + Double(minutes) * 60.0 + seconds
+        let percent = min(totalSeconds / 100.0, 100.0)
+        
+        return (percent, "合成中...")
     }
 
     // MARK: - 滤镜链构建
@@ -307,7 +300,6 @@ final class FFmpegService {
     }
 
     // MARK: - 辅助
-
 
     private func whichCommand(_ command: String) -> String? {
         let process = Process()

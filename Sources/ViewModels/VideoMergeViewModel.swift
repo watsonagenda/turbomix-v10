@@ -7,6 +7,7 @@
 //  - 添加文件夹时递归收集视频文件
 //  - 限制并发 probe 数量，防止大量文件卡死
 //  - 更好的错误处理和用户反馈
+//  - 使用现代 NSOpenPanel.begin(completionHandler:) API
 
 import SwiftUI
 import Combine
@@ -120,10 +121,12 @@ final class VideoMergeViewModel: ObservableObject {
         panel.prompt = "选择"
         panel.canCreateDirectories = true
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        outputDirectory = url
-        saveBookmark(for: url)
+        panel.begin { [weak self] result in
+            guard result == .OK,
+                  let selectedUrl = panel.url else { return }
+            self?.outputDirectory = selectedUrl
+            self?.saveBookmark(for: selectedUrl)
+        }
     }
 
     private func saveBookmark(for url: URL) {

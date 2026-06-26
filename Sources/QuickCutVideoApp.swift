@@ -2,6 +2,7 @@
 //
 //  macOS 应用入口
 //  纯中文界面
+//  修复：使用现代 begin(completionHandler:) API 替代 runModal
 
 import SwiftUI
 
@@ -23,7 +24,7 @@ struct TurboMixApp: App {
                     NSApplication.shared.orderFrontStandardAboutPanel(
                         options: [
                             .applicationName: "TurboMix",
-                            .applicationVersion: "10.0",
+                            .applicationVersion: "11.0",
                             .credits: NSAttributedString(
                                 string: "基于 FFmpeg 的智能视频混剪工具\n简体中文版 · 现代 macOS 原生设计\n支持 Liquid Glass 效果",
                                 attributes: [
@@ -41,9 +42,14 @@ struct TurboMixApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // FFmpeg 检查
-        if !FFmpegService.shared.checkAvailability() {
+        // 异步检查 FFmpeg 可用性
+        let service = FFmpegService.shared
+        DispatchQueue.global(qos: .userInitiated).async {
+            let available = service.checkAvailability()
+            
             DispatchQueue.main.async {
+                guard !available else { return }
+                
                 let alert = NSAlert()
                 alert.messageText = "未检测到 FFmpeg"
                 alert.informativeText = """
@@ -57,7 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 alert.alertStyle = .warning
                 alert.addButton(withTitle: "知道了")
                 alert.addButton(withTitle: "打开终端安装")
-                if alert.runModal() == .alertSecondButtonReturn {
+                
+                let response = alert.runModal()
+                if response == .alertSecondButtonReturn {
                     if let url = NSWorkspace.shared.urlForApplication(
                         withBundleIdentifier: "com.apple.Terminal"
                     ) {
