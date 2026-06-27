@@ -1,11 +1,6 @@
 //  FFmpegService.swift — TurboMix v11
 //
 //  核心引擎：ffprobe 分析 + ffmpeg concat 混剪
-//  修复：
-//  - 线程安全问题
-//  - probeVideos 并发限制
-//  - 优化资源释放
-//  - 修复 bundled ffmpeg 路径查找
 
 import Foundation
 
@@ -14,19 +9,17 @@ final class FFmpegService {
 
     // MARK: - ffmpeg / ffprobe 路径
 
-    /// 获取应用 Bundle 所在的 MacOS 目录路径
     private var bundleMacOSPath: String {
         let bundlePath = Bundle.main.bundlePath as NSString
-        return bundlePath.appendingPathComponent("MacOS") as String
+        let contentsPath = bundlePath.appendingPathComponent("Contents") as String
+        return (contentsPath as NSString).appendingPathComponent("MacOS")
     }
 
     private var ffmpegPath: String {
-        // 优先使用捆绑的 ffmpeg（在 Contents/MacOS/ 中）
         let bundledPath = "\(bundleMacOSPath)/ffmpeg"
         if FileManager.default.fileExists(atPath: bundledPath) {
             return bundledPath
         }
-        // 备选：使用系统 PATH 中的 ffmpeg
         if let path = whichCommand("ffmpeg") {
             return path
         }
@@ -34,12 +27,10 @@ final class FFmpegService {
     }
 
     private var ffprobePath: String {
-        // 优先使用捆绑的 ffprobe（在 Contents/MacOS/ 中）
         let bundledPath = "\(bundleMacOSPath)/ffprobe"
         if FileManager.default.fileExists(atPath: bundledPath) {
             return bundledPath
         }
-        // 备选：使用系统 PATH 中的 ffprobe
         if let path = whichCommand("ffprobe") {
             return path
         }
@@ -116,7 +107,7 @@ final class FFmpegService {
         results.reserveCapacity(urls.count)
         let total = urls.count
         var completed = 0
-        // 分批处理，每批最多 maxConcurrency 个任务
+        
         for chunk in urls.chunks(of: maxConcurrency) {
             try await withThrowingTaskGroup(of: (Int, VideoItem).self) { group in
                 for url in chunk {
@@ -139,7 +130,6 @@ final class FFmpegService {
             }
         }
         
-        // 按原始顺序排序
         results.sort { $0.index < $1.index }
         return results.map { $0.item }
     }
@@ -156,13 +146,11 @@ final class FFmpegService {
             throw FFmpegError.mergeFailed("没有可用的视频素材")
         }
 
-        // 创建临时目录
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
             "TurboMix_\(UUID().uuidString)"
         )
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
 
-        // 生成 concat 列表文件
         let listPath = tempDir.appendingPathComponent("inputs.txt").path
 
         var listContent = ""
@@ -172,7 +160,6 @@ final class FFmpegService {
         }
         try listContent.write(toFile: listPath, atomically: true, encoding: .utf8)
 
-        // 构建 ffmpeg 脚本（避免 shell 转义问题）
         var script = "#!/bin/bash\nset -e\n\n"
         script += "rm -f '\(listPath.replacingOccurrences(of: "'", with: "'\\''"))' << 'INPUTS_EOF'\n\(listContent)INPUTS_EOF\n\n"
 
@@ -184,7 +171,6 @@ final class FFmpegService {
             args.append(contentsOf: ["-c", "copy"])
         } else {
             let crf = config.outputQuality.ffmpegCRF
-            
             let filterChain = buildFilterChain(for: config)
             
             args.append(contentsOf: ["-f", "concat", "-safe", "0", "-i", listPath])
@@ -211,7 +197,6 @@ final class FFmpegService {
         script += "'\(cmdParts.joined(separator: "' '"))'\n"
         script += "\nrm -f '\(listPath.replacingOccurrences(of: "'", with: "'\\''"))'\n"
         
-        // 执行脚本
         let scriptPath = tempDir.appendingPathComponent("merge.sh").path
         try script.write(toFile: scriptPath, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptPath)
@@ -225,11 +210,9 @@ final class FFmpegService {
 
         try process.run()
 
-        // 读取 stderr 获取进度
         let fullData = try stderrPipe.fileHandleForReading.readToEnd()
         let output = String(data: fullData ?? Data(), encoding: .utf8) ?? ""
         
-        // 尝试从 stderr 解析进度
         if let progressLine = output.components(separatedBy: .newlines).last {
             if let percent = extractProgress(from: progressLine) {
                 await MainActor.run {
@@ -239,8 +222,6 @@ final class FFmpegService {
         }
 
         process.waitUntilExit()
-
-        // 清理临时文件
         try? FileManager.default.removeItem(at: tempDir)
 
         guard process.terminationStatus == 0 else {
@@ -248,9 +229,7 @@ final class FFmpegService {
         }
     }
 
-    /// 从 ffmpeg stderr 输出中提取进度百分比
     private func extractProgress(from line: String) -> (Double, String)? {
-        // ffmpeg 进度行格式: time=00:01:23.45 fps=30 q=-1.0 Lsize=   12345kB
         let components = line.components(separatedBy: "time=")
         guard components.count > 1 else { return nil }
         
@@ -268,8 +247,6 @@ final class FFmpegService {
         
         return (percent, "合成中...")
     }
-
-    // MARK: - 滤镜链构建
 
     private func buildFilterChain(for config: MergeConfig) -> String? {
         let targetAR = config.outputAspectRatio.ratio
@@ -298,8 +275,6 @@ final class FFmpegService {
             return "scale=-1:ih,split[a][b];[a]scale=ih*\(targetAR):ih[c];[b]scale=ih*\(targetAR):ih,blend=all_mode='overlay',gblur=sigma=15[bg];[bg][c]overlay=(ow-iw)/2:(oh-ih)/2"
         }
     }
-
-    // MARK: - 辅助
 
     private func whichCommand(_ command: String) -> String? {
         let process = Process()
@@ -362,9 +337,6 @@ final class FFmpegService {
     }
 }
 
-
-// MARK: - 数组扩展
-
 extension Array {
     func chunks(of size: Int) -> [[Element]] {
         return stride(from: 0, to: count, by: size).map {
@@ -372,8 +344,6 @@ extension Array {
         }
     }
 }
-
-// MARK: - 错误类型
 
 enum FFmpegError: LocalizedError {
     case probeFailed(String)

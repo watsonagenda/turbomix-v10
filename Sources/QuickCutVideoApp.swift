@@ -2,7 +2,6 @@
 //
 //  macOS 应用入口
 //  纯中文界面
-//  修复：使用现代 begin(completionHandler:) API 替代 runModal
 
 import SwiftUI
 
